@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model OAuthToken {
+  id           String    @id @default(cuid())
+  provider     String    @unique // "google"
+  accessToken  String
+  refreshToken String?
+  scope        String
+  expiryDate   DateTime?
+  updatedAt    DateTime  @updatedAt
+}
+
+model Trip {
+  id             String         @id @default(cuid())
+  title          String
+  locationLabel  String?
+  startDate      DateTime
+  endDate        DateTime
+  status         String         @default("suggested") // "suggested" | "confirmed" | "dismissed"
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  signals        Signal[]
+  journalEntries JournalEntry[]
+}
+
+model Signal {
+  id         String   @id @default(cuid())
+  trip       Trip?    @relation(fields: [tripId], references: [id])
+  tripId     String?
+  type       String   // "email" | "calendar" | "photo"
+  sourceId   String   // gmail message id / calendar event id / drive file id
+  summary    String
+  date       DateTime
+  confidence Float    @default(0.5)
+  rawMeta    String?  // JSON blob with type-specific details
+  createdAt  DateTime @default(now())
+
+  @@unique([type, sourceId])
+}
+
+model JournalEntry {
+  id        String   @id @default(cuid())
+  trip      Trip     @relation(fields: [tripId], references: [id])
+  tripId    String
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SyncState {
+  id           String    @id @default(cuid())
+  service      String    @unique // "gmail" | "calendar" | "drive"
+  lastSyncedAt DateTime?
+  cursor       String?
+}
