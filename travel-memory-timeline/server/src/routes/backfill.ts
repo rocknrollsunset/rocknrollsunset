@@ -2,27 +2,45 @@ import { Router } from "express";
 import { getAuthorizedClient } from "../auth/googleClient.js";
 import { scanGmail } from "../services/gmailScanner.js";
 import { scanCalendar } from "../services/calendarScanner.js";
-import { scanDrivePhotos } from "../services/driveScanner.js";
-import { clusterSignalsIntoTrips } from "../services/tripClusterer.js";
+import { attachDrivePhotos } from "../services/driveScanner.js";
+import { buildTrips } from "../services/tripClusterer.js";
 
 export const backfillRouter = Router();
 
-backfillRouter.post("/run", async (req, res) => {
-  const years = Number(req.body?.years ?? 6);
+let running = false;
+let lastResult: unknown = null;
+let lastError: string | null = null;
 
-  try {
-    const auth = await getAuthorizedClient();
+async function runBackfill(years: number) {
+  const auth = await getAuthorizedClient();
+  const [gmail, calendar] = await Promise.all([scanGmail(auth, years), scanCalendar(auth, years)]);
+  const trips = await buildTrips();
+  const photos = await attachDrivePhotos(auth, years);
+  return { gmail, calendar, trips, photos, finishedAt: new Date().toISOString() };
+}
 
-    const [gmailResult, calendarResult, driveResult] = await Promise.all([
-      scanGmail(auth, years),
-      scanCalendar(auth, years),
-      scanDrivePhotos(auth, years),
-    ]);
-
-    const clusterResult = await clusterSignalsIntoTrips();
-
-    res.json({ gmailResult, calendarResult, driveResult, clusterResult });
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
+// A multi-year scan outlives an HTTP request, so it runs in the background and the client polls.
+backfillRouter.post("/run", (req, res) => {
+  if (running) {
+    res.status(409).json({ error: "A scan is already running" });
+    return;
   }
+  const years = Number(req.body?.years ?? 6);
+  running = true;
+  lastError = null;
+  runBackfill(years)
+    .then((result) => {
+      lastResult = result;
+    })
+    .catch((err: Error) => {
+      lastError = err.message;
+    })
+    .finally(() => {
+      running = false;
+    });
+  res.status(202).json({ started: true });
+});
+
+backfillRouter.get("/status", (_req, res) => {
+  res.json({ running, lastResult, lastError });
 });

@@ -7,17 +7,18 @@ export interface EmailInput {
   internalDate: Date;
 }
 
-export interface ParsedSignal {
+export type SignalKind = "lodging" | "flight" | "reservation" | "event" | "email";
+
+export interface DetectedSignal {
+  kind: SignalKind;
+  isAnchor: boolean;
   summary: string;
-  date: Date;
-  startDate?: Date;
-  endDate?: Date;
+  startDay: string;
+  endDay: string;
   locationLabel?: string;
-  confidence: number;
+  bookingRef?: string;
 }
 
-export interface VendorParser {
-  name: string;
-  matches: (email: EmailInput) => boolean;
-  parse: (email: EmailInput) => ParsedSignal | null;
-}
+export type EmailResult =
+  | { type: "signal"; signal: DetectedSignal }
+  | { type: "cancellation"; bookingRef: string };

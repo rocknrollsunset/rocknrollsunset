@@ -31,16 +31,20 @@ model Trip {
 }
 
 model Signal {
-  id         String   @id @default(cuid())
-  trip       Trip?    @relation(fields: [tripId], references: [id])
-  tripId     String?
-  type       String   // "email" | "calendar" | "photo"
-  sourceId   String   // gmail message id / calendar event id / drive file id
-  summary    String
-  date       DateTime
-  confidence Float    @default(0.5)
-  rawMeta    String?  // JSON blob with type-specific details
-  createdAt  DateTime @default(now())
+  id            String    @id @default(cuid())
+  trip          Trip?     @relation(fields: [tripId], references: [id])
+  tripId        String?
+  type          String    // source: "email" | "calendar" | "photo"
+  sourceId      String    // gmail message id / calendar event id / drive file id
+  kind          String    @default("email") // "lodging" | "flight" | "reservation" | "event" | "email" | "photo"
+  isAnchor      Boolean   @default(false) // lodging/flights define a trip's dates; everything else attaches to one
+  summary       String
+  date          DateTime  // noon UTC on the local calendar day, so the day survives any US timezone
+  endDate       DateTime?
+  locationLabel String?
+  bookingRef    String?   // itinerary/confirmation number, used to drop cancelled bookings
+  rawMeta       String?
+  createdAt     DateTime  @default(now())
 
   @@unique([type, sourceId])
 }

@@ -1,8 +1,8 @@
 import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import { prisma } from "../db.js";
-
-const TRAVEL_TITLE_KEYWORDS = /\b(trip|vacation|getaway|cabin|lodge|resort|flight|cruise)\b/i;
+import { calendarEventToSignal } from "./parsers/calendar.js";
+import { saveSignal } from "./signalStore.js";
 
 export async function scanCalendar(auth: OAuth2Client, sinceYears: number) {
   const calendar = google.calendar({ version: "v3", auth });
@@ -23,34 +23,14 @@ export async function scanCalendar(auth: OAuth2Client, sinceYears: number) {
       pageToken,
     });
 
-    const events = list.data.items ?? [];
-    for (const event of events) {
+    for (const event of list.data.items ?? []) {
       if (!event.id) continue;
       scanned += 1;
 
-      const hasLocation = Boolean(event.location);
-      const titleMatches = TRAVEL_TITLE_KEYWORDS.test(event.summary ?? "");
-      if (!hasLocation && !titleMatches) continue;
+      const signal = calendarEventToSignal(event);
+      if (!signal) continue;
 
-      const exists = await prisma.signal.findUnique({
-        where: { type_sourceId: { type: "calendar", sourceId: event.id } },
-      });
-      if (exists) continue;
-
-      const start = event.start?.dateTime ?? event.start?.date;
-      const end = event.end?.dateTime ?? event.end?.date;
-      if (!start) continue;
-
-      await prisma.signal.create({
-        data: {
-          type: "calendar",
-          sourceId: event.id,
-          summary: event.summary || "Calendar event",
-          date: new Date(start),
-          confidence: hasLocation ? 0.6 : 0.4,
-          rawMeta: JSON.stringify({ location: event.location, start, end }),
-        },
-      });
+      await saveSignal("calendar", event.id, signal, { location: event.location, eventType: event.eventType });
       matched += 1;
     }
 

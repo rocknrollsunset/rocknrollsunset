@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, Trip } from "../api";
+import { formatDay, formatRange } from "../format";
 
 export default function TripDetail() {
   const { id } = useParams<{ id: string }>();
@@ -27,26 +28,55 @@ export default function TripDetail() {
 
   if (!trip) return <p>Loading...</p>;
 
+  const photos = trip.signals.filter((s) => s.type === "photo").sort((a, b) => a.date.localeCompare(b.date));
+  const details = trip.signals.filter((s) => s.type !== "photo").sort((a, b) => a.date.localeCompare(b.date));
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">{trip.title}</h1>
         <p className="text-slate-500">
-          {new Date(trip.startDate).toLocaleDateString()} – {new Date(trip.endDate).toLocaleDateString()}
+          {formatRange(trip.startDate, trip.endDate)}
+          {trip.locationLabel ? ` · ${trip.locationLabel}` : ""}
         </p>
       </div>
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Detected signals</h2>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">What we found</h2>
         <ul className="space-y-2">
-          {trip.signals.map((signal) => (
+          {details.map((signal) => (
             <li key={signal.id} className="rounded border bg-white p-3 text-sm">
-              <span className="mr-2 rounded bg-slate-100 px-2 py-0.5 text-xs uppercase">{signal.type}</span>
+              <span className="mr-2 rounded bg-slate-100 px-2 py-0.5 text-xs uppercase">{signal.kind}</span>
               {signal.summary}
-              <span className="ml-2 text-slate-400">{new Date(signal.date).toLocaleDateString()}</span>
+              <span className="ml-2 text-slate-400">{formatDay(signal.date)}</span>
             </li>
           ))}
         </ul>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Photos ({photos.length})
+        </h2>
+        {photos.length === 0 ? (
+          <p className="text-sm text-slate-500">No photos in Google Drive from these dates.</p>
+        ) : (
+          <ul className="grid grid-cols-1 gap-1 text-sm sm:grid-cols-2">
+            {photos.map((photo) => (
+              <li key={photo.id}>
+                <a
+                  href={`https://drive.google.com/file/d/${encodeURIComponent(photo.sourceId)}/view`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-slate-700 underline"
+                >
+                  {photo.summary}
+                </a>
+                <span className="ml-2 text-slate-400">{formatDay(photo.date)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section>

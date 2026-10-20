@@ -1,57 +1,56 @@
 import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import { prisma } from "../db.js";
+import { dateToDay, dayToDate } from "./dates.js";
+import { findTripForDay } from "./grouping.js";
+import { photoTakenDay } from "./parsers/photo.js";
 
-export async function scanDrivePhotos(auth: OAuth2Client, sinceYears: number) {
+// Photos never create trips; they attach to a trip whose dates they were taken within.
+export async function attachDrivePhotos(auth: OAuth2Client, sinceYears: number) {
+  const trips = (await prisma.trip.findMany({ where: { status: { not: "dismissed" } } })).map((t) => ({
+    id: t.id,
+    startDay: dateToDay(t.startDate),
+    endDay: dateToDay(t.endDate),
+  }));
+  if (trips.length === 0) return { scanned: 0, attached: 0 };
+
   const drive = google.drive({ version: "v3", auth });
   const afterDate = new Date();
   afterDate.setFullYear(afterDate.getFullYear() - sinceYears);
 
   let pageToken: string | undefined;
   let scanned = 0;
-  let matched = 0;
+  let attached = 0;
 
   do {
     const list = await drive.files.list({
-      q: "mimeType contains 'image/' and trashed = false",
-      fields: "nextPageToken, files(id, name, imageMediaMetadata, createdTime)",
+      q: `mimeType contains 'image/' and trashed = false and createdTime > '${afterDate.toISOString()}'`,
+      fields: "nextPageToken, files(id, name, createdTime, imageMediaMetadata(time))",
+      pageSize: 1000,
       pageToken,
-      pageSize: 200,
     });
 
-    const files = list.data.files ?? [];
-    for (const file of files) {
+    for (const file of list.data.files ?? []) {
       if (!file.id) continue;
       scanned += 1;
 
-      const taken = file.imageMediaMetadata?.time
-        ? new Date(file.imageMediaMetadata.time)
-        : file.createdTime
-          ? new Date(file.createdTime)
-          : null;
-      if (!taken || taken < afterDate) continue;
+      const day = photoTakenDay(file);
+      const trip = day ? findTripForDay(trips, day, 0) : undefined;
+      if (!day || !trip) continue;
 
-      // Only geotagged photos count as trip signals for now -- home photos would
-      // otherwise swamp every cluster near your own city.
-      const location = file.imageMediaMetadata?.location;
-      if (!location) continue;
-
-      const exists = await prisma.signal.findUnique({
+      await prisma.signal.upsert({
         where: { type_sourceId: { type: "photo", sourceId: file.id } },
-      });
-      if (exists) continue;
-
-      await prisma.signal.create({
-        data: {
+        create: {
           type: "photo",
           sourceId: file.id,
+          kind: "photo",
           summary: file.name || "Photo",
-          date: taken,
-          confidence: 0.5,
-          rawMeta: JSON.stringify({ lat: location.latitude, lng: location.longitude }),
+          date: dayToDate(day),
+          tripId: trip.id,
         },
+        update: {},
       });
-      matched += 1;
+      attached += 1;
     }
 
     pageToken = list.data.nextPageToken ?? undefined;
@@ -63,5 +62,5 @@ export async function scanDrivePhotos(auth: OAuth2Client, sinceYears: number) {
     update: { lastSyncedAt: new Date() },
   });
 
-  return { scanned, matched };
+  return { scanned, attached };
 }

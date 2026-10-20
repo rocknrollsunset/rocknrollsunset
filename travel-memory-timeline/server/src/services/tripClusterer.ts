@@ -1,74 +1,64 @@
 import { prisma } from "../db.js";
-
-const GAP_TOLERANCE_MS = 2 * 24 * 60 * 60 * 1000; // 2 days between signals to stay in the same trip
+import { dateToDay, dayToDate } from "./dates.js";
+import { AnchorInput, findTripForDay, groupAnchors, tripLocation, tripTitle } from "./grouping.js";
 
 type SignalRow = Awaited<ReturnType<typeof prisma.signal.findMany>>[number];
 
-function readRawMeta(signal: SignalRow): Record<string, unknown> {
-  if (!signal.rawMeta) return {};
-  try {
-    return JSON.parse(signal.rawMeta);
-  } catch {
-    return {};
-  }
+function asAnchor(signal: SignalRow): AnchorInput {
+  const startDay = dateToDay(signal.date);
+  return {
+    id: signal.id,
+    kind: signal.kind,
+    summary: signal.summary,
+    startDay,
+    endDay: signal.endDate ? dateToDay(signal.endDate) : startDay,
+    locationLabel: signal.locationLabel,
+  };
 }
 
-export async function clusterSignalsIntoTrips() {
-  const signals = await prisma.signal.findMany({
-    where: { tripId: null },
-    orderBy: { date: "asc" },
-  });
+async function loadTripRanges() {
+  const trips = await prisma.trip.findMany();
+  return trips.map((t) => ({ id: t.id, startDay: dateToDay(t.startDate), endDay: dateToDay(t.endDate) }));
+}
 
-  const clusters: SignalRow[][] = [];
-  let current: SignalRow[] = [];
+export async function buildTrips() {
+  const existing = await loadTripRanges();
+  const anchors = (await prisma.signal.findMany({ where: { tripId: null, isAnchor: true } })).map(asAnchor);
 
-  for (const signal of signals) {
-    if (current.length === 0) {
-      current.push(signal);
-      continue;
-    }
-    const last = current[current.length - 1];
-    if (signal.date.getTime() - last.date.getTime() <= GAP_TOLERANCE_MS) {
-      current.push(signal);
+  const fresh: AnchorInput[] = [];
+  for (const anchor of anchors) {
+    const trip = existing.find((t) => anchor.startDay <= t.endDay && anchor.endDay >= t.startDay);
+    if (trip) {
+      await prisma.signal.update({ where: { id: anchor.id }, data: { tripId: trip.id } });
     } else {
-      clusters.push(current);
-      current = [signal];
+      fresh.push(anchor);
     }
   }
-  if (current.length > 0) clusters.push(current);
 
-  let created = 0;
-  for (const cluster of clusters) {
-    // Require either one corroborating signal (email/calendar) or 2+ weaker signals,
-    // so a single geotagged photo near home doesn't become a "trip".
-    const strongSignal = cluster.some((s) => s.confidence >= 0.5);
-    if (!strongSignal && cluster.length < 2) continue;
-
-    const dates = cluster.map((s) => s.date.getTime());
-    const startDate = new Date(Math.min(...dates));
-    const endDate = new Date(Math.max(...dates));
-
-    const emailSignal = cluster.find((s) => s.type === "email");
-    const calendarSignal = cluster.find((s) => s.type === "calendar");
-
-    const locationLabel =
-      (emailSignal && (readRawMeta(emailSignal).locationLabel as string | undefined)) ||
-      (calendarSignal && (readRawMeta(calendarSignal).location as string | undefined)) ||
-      undefined;
-
-    const title = locationLabel || emailSignal?.summary || calendarSignal?.summary || "Trip";
-
+  const groups = groupAnchors(fresh);
+  for (const group of groups) {
+    const startDay = group.reduce((min, a) => (a.startDay < min ? a.startDay : min), group[0].startDay);
+    const endDay = group.reduce((max, a) => (a.endDay > max ? a.endDay : max), group[0].endDay);
     await prisma.trip.create({
       data: {
-        title,
-        locationLabel,
-        startDate,
-        endDate,
-        signals: { connect: cluster.map((s) => ({ id: s.id })) },
+        title: tripTitle(group),
+        locationLabel: tripLocation(group),
+        startDate: dayToDate(startDay),
+        endDate: dayToDate(endDay),
+        signals: { connect: group.map((a) => ({ id: a.id })) },
       },
     });
-    created += 1;
   }
 
-  return { clustersEvaluated: clusters.length, tripsCreated: created };
+  const trips = await loadTripRanges();
+  const loose = await prisma.signal.findMany({ where: { tripId: null, isAnchor: false } });
+  let attached = 0;
+  for (const signal of loose) {
+    const trip = findTripForDay(trips, dateToDay(signal.date), 1);
+    if (!trip) continue;
+    await prisma.signal.update({ where: { id: signal.id }, data: { tripId: trip.id } });
+    attached += 1;
+  }
+
+  return { tripsCreated: groups.length, signalsAttached: attached };
 }

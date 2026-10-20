@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, Trip } from "../api";
+import { formatRange } from "../format";
 
 export default function Timeline() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [backfillRunning, setBackfillRunning] = useState(false);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -24,9 +26,18 @@ export default function Timeline() {
 
   async function runBackfill() {
     setBackfillRunning(true);
+    setBackfillError(null);
     try {
-      await api.runBackfill(6);
+      await api.startBackfill(6);
+      let status = await api.backfillStatus();
+      while (status.running) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        status = await api.backfillStatus();
+      }
+      if (status.lastError) setBackfillError(status.lastError);
       await load();
+    } catch (err) {
+      setBackfillError((err as Error).message);
     } finally {
       setBackfillRunning(false);
     }
@@ -59,6 +70,7 @@ export default function Timeline() {
           {backfillRunning ? "Scanning last 6 years..." : "Run 6-year backfill scan"}
         </button>
       </div>
+      {backfillError && <p className="text-sm text-rose-700">{backfillError}</p>}
 
       {loading ? (
         <p>Loading...</p>
@@ -86,8 +98,9 @@ export default function Timeline() {
                       </div>
                     </div>
                     <p className="text-sm text-slate-500">
-                      {new Date(trip.startDate).toLocaleDateString()} – {new Date(trip.endDate).toLocaleDateString()} ·{" "}
-                      {trip.signals.length} signal{trip.signals.length === 1 ? "" : "s"}
+                      {formatRange(trip.startDate, trip.endDate)}
+                      {trip.locationLabel ? ` · ${trip.locationLabel}` : ""} · {trip.signals.length} item
+                      {trip.signals.length === 1 ? "" : "s"}
                     </p>
                   </li>
                 ))}
@@ -104,7 +117,8 @@ export default function Timeline() {
                     {trip.title}
                   </Link>
                   <p className="text-sm text-slate-500">
-                    {new Date(trip.startDate).toLocaleDateString()} – {new Date(trip.endDate).toLocaleDateString()}
+                    {formatRange(trip.startDate, trip.endDate)}
+                    {trip.locationLabel ? ` · ${trip.locationLabel}` : ""}
                   </p>
                 </li>
               ))}

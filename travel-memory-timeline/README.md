@@ -5,31 +5,38 @@ photos into a single timeline of your trips, with a journal entry per trip.
 
 ## How it works
 
-1. **Scan.** The backend searches Gmail for travel-vendor emails and keyword matches,
-   pulls Calendar events that have a location or a travel-sounding title, and pulls
-   geotagged photos from Google Drive — all going back N years (6 by default).
-2. **Cluster.** Signals that fall within ~2 days of each other are grouped into a
-   single candidate trip.
-3. **Review.** Every detected trip starts as "suggested." You confirm or dismiss it
-   on the timeline — detection from 6 years of email is never going to be 100%
-   accurate, so this review step keeps false positives out of your actual timeline.
-4. **Journal.** Confirmed trips are where you add free-text notes, same as a diary
-   entry, alongside the auto-detected signals (reservation, calendar event, photos).
+1. **Find anchors.** Hotel stays and flights define a trip's dates. They come from:
+   - Google Calendar's auto-created "Stay at …" / "Flight to …" events (Gmail makes
+     these from confirmation emails, with exact dates and addresses).
+   - Confirmation emails, for older bookings that never got a calendar event:
+     Hotels.com/Expedia check-in/check-out, hotel folio subjects ("Your FRIDAY
+     JUNE 7, 2024 - SUNDAY JUNE 9, 2024 Stay at …"), and Southwest flights.
+     Cancellation emails remove the booking they cancel.
+2. **Group.** Overlapping or back-to-back anchors become one trip (checking out of one
+   hotel and into the next is a single road trip).
+3. **Attach.** Restaurant reservations, shows, and travel emails that fall inside a
+   trip's dates attach to it. They never create a trip on their own, so movie nights
+   and local concerts stay off the timeline. Google Drive photos attach by the day
+   they were taken (EXIF time, then camera filename), no GPS needed.
+4. **Review.** Every detected trip starts as "suggested." You confirm or dismiss it.
+5. **Journal.** Add notes to any trip alongside what was found.
 
 ## Known limitations (read before you run the 6-year backfill)
 
-- **No direct Google Photos access.** This session only has a Google Drive
-  connector, not Google Photos. If your photos live in Google Photos and aren't
-  also synced to a Drive folder, they won't show up — you'd need to export them to
-  Drive first, or swap in the Google Photos Library API later.
-- **Email parsing is heuristic, not perfect.** Vendor parsers cover major airlines,
-  hotel chains, Airbnb/Vrbo, Booking.com, and rental car companies by sender domain
-  + keyword + date extraction. Anything else falls back to a generic keyword+date
-  matcher with lower confidence. Expect to dismiss some false positives and manually
-  add trips the scan misses.
-- **Gmail scope is broad (read-only).** The OAuth scope is `gmail.readonly`, which
-  can read your whole inbox, not just matching messages — Google requires the broad
-  scope for search; the app only ever stores emails matched by the travel query.
+- **Trips without a hotel or flight email are missed.** A day trip, or a stay with
+  family, has nothing to anchor it. A restaurant reservation in another city doesn't
+  create a trip yet, since the app doesn't know where home is.
+- **Photos come from Google Drive only.** Photos that live only in Google Photos
+  won't show up. The trip page links to each photo in Drive rather than showing
+  thumbnails.
+- **Email parsing covers the formats seen so far.** Hotels.com/Expedia (both current
+  and older layouts), Marriott folios, and Southwest. Other senders are detected
+  through Google Calendar's auto-created events when those exist.
+- **Gmail scope is broad (read-only).** `gmail.readonly` can read the whole inbox;
+  the app only stores emails that match the travel query.
+- **Google re-asks every 7 days.** While the OAuth app is in "Testing" mode, Google
+  expires refresh tokens after a week, so click "Connect Google Account" again before
+  rescanning.
 
 ## Setup (about 20 minutes)
 
@@ -62,11 +69,13 @@ photos into a single timeline of your trips, with a journal entry per trip.
    ```
    Client runs at http://localhost:5173.
 
-4. **Connect and backfill** (~5 min to click through, scan itself can take a while
-   for 6 years of email — expect several minutes depending on inbox size):
+4. **Connect and backfill** (~5 min to click through; the scan itself runs in the
+   background and can take 10–30 minutes for 6 years of email):
    - Open http://localhost:5173, click "Connect Google Account", approve the scopes.
-   - Click "Run 6-year backfill scan".
+   - Click "Run 6-year backfill scan" and leave the tab open until it finishes.
    - Review the "Needs review" section — confirm real trips, dismiss noise.
+
+Run the detection tests with `npm test` in `server/`.
 
 ## Project layout
 

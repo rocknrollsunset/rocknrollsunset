@@ -1,10 +1,19 @@
 export interface Signal {
   id: string;
   type: string;
+  sourceId: string;
+  kind: string;
+  isAnchor: boolean;
   summary: string;
   date: string;
-  confidence: number;
-  rawMeta: string | null;
+  endDate: string | null;
+  locationLabel: string | null;
+}
+
+export interface BackfillStatus {
+  running: boolean;
+  lastResult: unknown;
+  lastError: string | null;
 }
 
 export interface JournalEntry {
@@ -30,7 +39,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
-  if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `Request failed: ${res.status}`);
+  }
   if (res.status === 204) return undefined as T;
   return res.json();
 }
@@ -43,6 +55,7 @@ export const api = {
   deleteTrip: (id: string) => request<void>(`/api/trips/${id}`, { method: "DELETE" }),
   addJournalEntry: (tripId: string, body: string) =>
     request<JournalEntry>(`/api/journal/${tripId}`, { method: "POST", body: JSON.stringify({ body }) }),
-  runBackfill: (years: number) =>
-    request<unknown>(`/api/backfill/run`, { method: "POST", body: JSON.stringify({ years }) }),
+  startBackfill: (years: number) =>
+    request<{ started: boolean }>(`/api/backfill/run`, { method: "POST", body: JSON.stringify({ years }) }),
+  backfillStatus: () => request<BackfillStatus>(`/api/backfill/status`),
 };

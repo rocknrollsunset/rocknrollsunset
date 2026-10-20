@@ -1,10 +1,15 @@
 import { google, gmail_v1 } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import { prisma } from "../db.js";
-import { parseEmail } from "./parsers/index.js";
+import { parseEmail } from "./parsers/email.js";
+import { saveSignal } from "./signalStore.js";
 
-const SEARCH_QUERY =
-  '(subject:(itinerary OR reservation OR confirmation OR "check-in" OR "boarding pass" OR "your stay" OR "your trip") OR from:(airbnb.com OR vrbo.com OR booking.com OR marriott.com OR hilton.com OR delta.com OR united.com OR southwest.com OR aa.com OR enterprise.com OR hertz.com OR avis.com OR budget.com))';
+const SEARCH_QUERY = [
+  "(category:reservations",
+  'OR subject:(itinerary OR reservation OR confirmation OR confirmed OR "check-in" OR "boarding pass" OR "stay at" OR "your stay" OR cancellation OR canceled OR cancelled)',
+  "OR from:(hotels.com OR expedia.com OR airbnb.com OR vrbo.com OR booking.com OR marriott.com OR hilton.com OR ihg.com OR hyatt.com OR southwest.com OR delta.com OR united.com OR aa.com OR opentable.com))",
+  "-in:sent -category:promotions",
+].join(" ");
 
 function decodeBase64Url(data: string): string {
   return Buffer.from(data, "base64url").toString("utf-8");
@@ -22,7 +27,10 @@ function extractPlainText(payload: gmail_v1.Schema$MessagePart | undefined): str
     }
   }
   if (payload.mimeType === "text/html" && payload.body?.data) {
-    return decodeBase64Url(payload.body.data).replace(/<[^>]+>/g, " ");
+    return decodeBase64Url(payload.body.data)
+      .replace(/<[^>]+>/g, "\n")
+      .replace(/&nbsp;/g, " ")
+      .replace(/\n\s*\n+/g, "\n");
   }
   return "";
 }
@@ -37,6 +45,7 @@ export async function scanGmail(auth: OAuth2Client, sinceYears: number) {
   afterDate.setFullYear(afterDate.getFullYear() - sinceYears);
   const after = Math.floor(afterDate.getTime() / 1000);
 
+  const cancelledRefs = new Set<string>();
   let pageToken: string | undefined;
   let scanned = 0;
   let matched = 0;
@@ -49,8 +58,7 @@ export async function scanGmail(auth: OAuth2Client, sinceYears: number) {
       maxResults: 100,
     });
 
-    const messages = list.data.messages ?? [];
-    for (const msg of messages) {
+    for (const msg of list.data.messages ?? []) {
       if (!msg.id) continue;
       scanned += 1;
 
@@ -70,30 +78,25 @@ export async function scanGmail(auth: OAuth2Client, sinceYears: number) {
         internalDate: full.data.internalDate ? new Date(Number(full.data.internalDate)) : new Date(),
       };
 
-      const parsed = parseEmail(email);
-      if (!parsed) continue;
+      const result = parseEmail(email);
+      if (!result) continue;
+      if (result.type === "cancellation") {
+        cancelledRefs.add(result.bookingRef);
+        continue;
+      }
 
-      await prisma.signal.create({
-        data: {
-          type: "email",
-          sourceId: msg.id,
-          summary: parsed.summary,
-          date: parsed.date,
-          confidence: parsed.confidence,
-          rawMeta: JSON.stringify({
-            from: email.from,
-            subject: email.subject,
-            startDate: parsed.startDate,
-            endDate: parsed.endDate,
-            locationLabel: parsed.locationLabel,
-          }),
-        },
-      });
+      await saveSignal("email", msg.id, result.signal, { from: email.from, subject: email.subject });
       matched += 1;
     }
 
     pageToken = list.data.nextPageToken ?? undefined;
   } while (pageToken);
+
+  // Cancellations can arrive before or after the booking they cancel, so prune once at the end.
+  const cancelled =
+    cancelledRefs.size > 0
+      ? await prisma.signal.deleteMany({ where: { bookingRef: { in: [...cancelledRefs] }, tripId: null } })
+      : { count: 0 };
 
   await prisma.syncState.upsert({
     where: { service: "gmail" },
@@ -101,5 +104,5 @@ export async function scanGmail(auth: OAuth2Client, sinceYears: number) {
     update: { lastSyncedAt: new Date() },
   });
 
-  return { scanned, matched };
+  return { scanned, matched, cancelledRemoved: cancelled.count };
 }
