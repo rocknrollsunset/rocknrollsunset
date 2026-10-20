@@ -6,6 +6,7 @@ import { authRouter } from "./routes/auth.js";
 import { tripsRouter } from "./routes/trips.js";
 import { journalRouter } from "./routes/journal.js";
 import { backfillRouter } from "./routes/backfill.js";
+import { photosRouter } from "./routes/photos.js";
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.use("/auth", authRouter);
 app.use("/api/trips", tripsRouter);
 app.use("/api/journal", journalRouter);
 app.use("/api/backfill", backfillRouter);
+app.use("/api/photos", photosRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

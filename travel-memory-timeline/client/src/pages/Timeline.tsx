@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, Trip } from "../api";
 import { formatRange } from "../format";
+import { describeImport, pickFromGooglePhotos } from "../googlePhotos";
 
 export default function Timeline() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [backfillRunning, setBackfillRunning] = useState(false);
   const [backfillError, setBackfillError] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoStatus, setPhotoStatus] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -43,6 +46,20 @@ export default function Timeline() {
     }
   }
 
+  async function importPhotos() {
+    setPhotoBusy(true);
+    setPhotoStatus(null);
+    try {
+      const result = await pickFromGooglePhotos(undefined, setPhotoStatus);
+      setPhotoStatus(describeImport(result));
+      await load();
+    } catch (err) {
+      setPhotoStatus((err as Error).message);
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
   async function confirmTrip(id: string) {
     await api.updateTrip(id, { status: "confirmed" });
     load();
@@ -69,8 +86,22 @@ export default function Timeline() {
         >
           {backfillRunning ? "Scanning last 6 years..." : "Run 6-year backfill scan"}
         </button>
+        <button
+          onClick={importPhotos}
+          disabled={photoBusy}
+          className="rounded border border-slate-900 px-4 py-2 text-sm disabled:opacity-50"
+        >
+          {photoBusy ? "Importing photos..." : "Import from Google Photos"}
+        </button>
       </div>
       {backfillError && <p className="text-sm text-rose-700">{backfillError}</p>}
+      {photoStatus && <p className="text-sm text-slate-600">{photoStatus}</p>}
+      {!photoStatus && (
+        <p className="text-sm text-slate-500">
+          Google Photos only shares the photos you pick. Select photos from any of your trips and each one is filed
+          under the trip it was taken during.
+        </p>
+      )}
 
       {loading ? (
         <p>Loading...</p>

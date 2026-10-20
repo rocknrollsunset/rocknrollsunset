@@ -10,6 +10,21 @@ export interface Signal {
   locationLabel: string | null;
 }
 
+export interface PhotoImportResult {
+  imported: number;
+  outsideTrips: number;
+  unsupported: number;
+  videosSkipped: number;
+}
+
+export interface PhotoSyncStatus {
+  state: "waiting" | "importing" | "done" | "error";
+  done?: number;
+  total?: number;
+  result?: PhotoImportResult;
+  error?: string;
+}
+
 export interface BackfillStatus {
   running: boolean;
   lastResult: unknown;
@@ -58,4 +73,12 @@ export const api = {
   startBackfill: (years: number) =>
     request<{ started: boolean }>(`/api/backfill/run`, { method: "POST", body: JSON.stringify({ years }) }),
   backfillStatus: () => request<BackfillStatus>(`/api/backfill/status`),
+  startPhotoPicker: () =>
+    request<{ sessionId: string; pickerUri: string; pollIntervalMs: number }>(`/api/photos/picker`, { method: "POST" }),
+  syncPickedPhotos: (sessionId: string, tripId?: string) =>
+    request<PhotoSyncStatus>(`/api/photos/picker/${encodeURIComponent(sessionId)}/sync`, {
+      method: "POST",
+      body: JSON.stringify({ tripId }),
+    }),
+  photoUrl: (signalId: string) => `/api/photos/${encodeURIComponent(signalId)}/file`,
 };

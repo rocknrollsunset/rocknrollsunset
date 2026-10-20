@@ -1,10 +1,13 @@
 import { google } from "googleapis";
 import { prisma } from "../db.js";
 
+export const PHOTOS_PICKER_SCOPE = "https://www.googleapis.com/auth/photospicker.mediaitems.readonly";
+
 const SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/calendar.readonly",
   "https://www.googleapis.com/auth/drive.readonly",
+  PHOTOS_PICKER_SCOPE,
 ];
 
 export function createOAuthClient() {
@@ -46,10 +49,14 @@ export async function storeTokensFromCode(code: string) {
   });
 }
 
-export async function getAuthorizedClient() {
+export async function getAuthorizedClient(requiredScope?: string) {
   const saved = await prisma.oAuthToken.findUnique({ where: { provider: "google" } });
   if (!saved) {
     throw new Error("Not connected to Google yet. Visit /auth/google to connect.");
+  }
+  // Google lets people untick individual permissions, and older connections predate a scope.
+  if (requiredScope && !saved.scope.split(" ").includes(requiredScope)) {
+    throw new Error('That Google permission wasn\'t granted. Click "Connect Google Account" again and allow it.');
   }
 
   const client = createOAuthClient();

@@ -1,7 +1,7 @@
 # Travel Memory Timeline
 
-Pulls hotel/flight confirmation emails, calendar events, and geotagged Google Drive
-photos into a single timeline of your trips, with a journal entry per trip.
+Pulls hotel/flight confirmation emails, calendar events, and your Google Photos and
+Google Drive pictures into a single timeline of your trips, with a journal entry per trip.
 
 ## How it works
 
@@ -19,16 +19,26 @@ photos into a single timeline of your trips, with a journal entry per trip.
    and local concerts stay off the timeline. Google Drive photos attach by the day
    they were taken (EXIF time, then camera filename), no GPS needed.
 4. **Review.** Every detected trip starts as "suggested." You confirm or dismiss it.
-5. **Journal.** Add notes to any trip alongside what was found.
+5. **Add Google Photos.** Google only lets apps see photos you pick in its own picker
+   (since March 2025 no app can scan a whole library). Two ways in:
+   - **Import from Google Photos** on the timeline: pick photos from any number of
+     trips (up to 2,000 at a time) and each is filed under the trip it was taken
+     during. Photos from outside any trip are skipped without downloading.
+   - **Add from Google Photos** on a trip: everything you pick goes to that trip.
+
+   Picked photos are saved locally at 2048px (in `server/data/photos/`) because
+   Google's links to them expire after an hour. Videos are skipped for now.
+6. **Journal.** Add notes to any trip alongside what was found.
 
 ## Known limitations (read before you run the 6-year backfill)
 
 - **Trips without a hotel or flight email are missed.** A day trip, or a stay with
   family, has nothing to anchor it. A restaurant reservation in another city doesn't
   create a trip yet, since the app doesn't know where home is.
-- **Photos come from Google Drive only.** Photos that live only in Google Photos
-  won't show up. The trip page links to each photo in Drive rather than showing
-  thumbnails.
+- **Google Photos needs you to pick.** The backfill scan can't reach Google Photos,
+  and the picker can't be pre-filtered to a trip's dates, so you browse or search
+  (by place or date) inside it. HEIC originals that Google doesn't convert, and
+  videos, are skipped. Drive photos are still found automatically, as links.
 - **Email parsing covers the formats seen so far.** Hotels.com/Expedia (both current
   and older layouts), Marriott folios, and Southwest. Other senders are detected
   through Google Calendar's auto-created events when those exist.
@@ -42,7 +52,8 @@ photos into a single timeline of your trips, with a journal entry per trip.
 
 1. **Create Google OAuth credentials** (~10 min):
    - Go to https://console.cloud.google.com/, create a project.
-   - Enable the **Gmail API**, **Google Calendar API**, and **Google Drive API**.
+   - Enable the **Gmail API**, **Google Calendar API**, **Google Drive API**, and
+     **Google Photos Picker API**.
    - Go to "APIs & Services" → "Credentials" → "Create Credentials" → "OAuth client ID".
    - Application type: "Web application". Add authorized redirect URI:
      `http://localhost:4000/auth/google/callback`
@@ -74,6 +85,12 @@ photos into a single timeline of your trips, with a journal entry per trip.
    - Open http://localhost:5173, click "Connect Google Account", approve the scopes.
    - Click "Run 6-year backfill scan" and leave the tab open until it finishes.
    - Review the "Needs review" section — confirm real trips, dismiss noise.
+   - Click "Import from Google Photos". A Google Photos tab opens (allow pop-ups for
+     localhost, and be signed in to the same Google account); pick, click Done, and
+     the tab closes itself while the app saves the photos.
+
+If you connected before Google Photos support was added, click "Connect Google
+Account" again so Google asks for the new permission.
 
 Run the detection tests with `npm test` in `server/`.
 
@@ -86,7 +103,7 @@ client/   React + Vite + Tailwind timeline UI
 
 ## Suggested next steps
 
-- Add a photo-upload fallback for trips the auto-scan misses entirely.
+- Add a manual "new trip" button for trips the auto-scan misses entirely.
 - Swap SQLite for Postgres and deploy both halves if you want this on your phone
   away from localhost (e.g. Railway/Fly.io for the server, Vercel/Netlify for the
   client).

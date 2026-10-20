@@ -43,6 +43,7 @@ model Signal {
   endDate       DateTime?
   locationLabel String?
   bookingRef    String?   // itinerary/confirmation number, used to drop cancelled bookings
+  filePath      String?   // stored photo, relative to PHOTO_DIR (Google Photos links expire after an hour)
   rawMeta       String?
   createdAt     DateTime  @default(now())
 
